@@ -21,12 +21,12 @@ def get_safe_data(symbol_list):
             continue
     return pd.DataFrame(results)
 
-# --- 2. SESSION STATE (Managing your list) ---
+# --- 2. SESSION STATE MANAGEMENT ---
 if 'symbols' not in st.session_state:
     st.session_state.symbols = ['AAPL', 'TSLA', 'NVDA', 'BTC-USD', 'ETH-USD']
 
-# --- 3. SIDEBAR: ADD / REMOVE ASSETS ---
-st.sidebar.header("🛡️ Manage Portfolio")
+# --- 3. SIDEBAR LAYOUT ---
+st.sidebar.header("🛡️ Portfolio Controls")
 
 # Add Section
 new_ticker = st.sidebar.text_input("Add Ticker (e.g. MSFT or SOL-USD)").upper()
@@ -38,32 +38,35 @@ if st.sidebar.button("➕ Add to Portfolio") and new_ticker:
 
 st.sidebar.markdown("---")
 
-# Remove Section
-st.sidebar.subheader("Remove Assets")
-for sym in st.session_state.symbols:
-    # Small buttons to delete specific symbols
-    if st.sidebar.button(f"❌ Remove {sym}", key=f"del_{sym}"):
-        st.session_state.symbols.remove(sym)
-        st.rerun()
-
-# --- 4. DATA PROCESSING ---
+# Fetch Data
 df_raw = get_safe_data(st.session_state.symbols)
 
-if df_raw.empty:
-    st.error("Waiting for data... try adding a ticker or clicking 'Force Refresh' in 5 minutes.")
-else:
-    st.sidebar.markdown("---")
-    st.sidebar.header("🎯 2030 Targets ($B)")
+if not df_raw.empty:
+    # A. TARGET SLIDERS (Now Above Remove Buttons)
+    st.sidebar.header("🎯 2030 Target Market Cap ($B)")
     targets = {}
     for _, row in df_raw.iterrows():
-        # MAX MC = 20x Current MC
         curr_mc = int(row['Current MC (B)'])
+        # MAX MC = 20x Current MC
+        # DEFAULT = 5x Current MC for all assets
         targets[row['Symbol']] = st.sidebar.slider(
             f"{row['Symbol']} Target", 
-            1, curr_mc * 20, curr_mc * 2, step=10
+            min_value=1, 
+            max_value=curr_mc * 20, 
+            value=curr_mc * 5, 
+            step=10
         )
 
-    # Calculation logic
+    st.sidebar.markdown("---")
+
+    # B. REMOVE ASSETS (Now Below Sliders)
+    with st.sidebar.expander("🗑️ Remove Assets from List"):
+        for sym in st.session_state.symbols:
+            if st.button(f"Remove {sym}", key=f"del_{sym}"):
+                st.session_state.symbols.remove(sym)
+                st.rerun()
+
+    # --- 4. MATH & RANKING ---
     def calculate(row):
         target_mc = targets[row['Symbol']]
         cagr = ((target_mc / row['Current MC (B)'])**(1/5) - 1) * 100
@@ -71,19 +74,20 @@ else:
         return pd.Series([target_mc, target_p, cagr])
 
     df_raw[['Target MC', 'Target Price', 'CAGR (%)']] = df_raw.apply(calculate, axis=1)
+    
+    # Sort everything by CAGR for the visual ranking
     df_final = df_raw.sort_values('CAGR (%)', ascending=False)
 
     # --- 5. MAIN PAGE LAYOUT ---
     st.title("🏆 2030 CAGR Leaderboard")
 
-    # Table Formatting: Center Align, No Index, Styled Numbers
-    # hide_index=True removes that first column of random numbers
+    # Table: Hidden index, centered numbers via config
     st.dataframe(
         df_final[['Symbol', 'Current Price', 'Current MC (B)', 'Target MC', 'Target Price', 'CAGR (%)']],
         hide_index=True, 
         use_container_width=True,
         column_config={
-            "Symbol": st.column_config.TextColumn("Symbol", help="Asset Name"),
+            "Symbol": st.column_config.TextColumn("Symbol"),
             "Current Price": st.column_config.NumberColumn("Price", format="$%.2f"),
             "Current MC (B)": st.column_config.NumberColumn("Current MC", format="$%.0fB"),
             "Target MC": st.column_config.NumberColumn("Target MC (2030)", format="$%.0fB"),
@@ -92,7 +96,10 @@ else:
         }
     )
 
-    # Visual below the table
-    st.markdown("### 📊 Return Potential Visualized")
-    # Centers and sorts the chart by CAGR
+    # Visual below the table, strictly ordered by rank
+    st.markdown("### 📊 Ranked Return Potential")
+    # Using sort=False ensures the chart keeps the rank order we set in the dataframe
     st.bar_chart(df_final, x="Symbol", y="CAGR (%)", color="#29b5e8", use_container_width=True)
+
+else:
+    st.warning("Please add a valid ticker to begin.")
