@@ -3,89 +3,91 @@ import yfinance as yf
 import pandas as pd
 
 # 1. Page Configuration
-st.set_page_config(layout="wide", page_title="2030 CAGR Simulator")
-st.title("📈 2030 Investment Strategy Simulator")
+st.set_page_config(layout="wide", page_title="2030 Portfolio Simulator")
 
-# --- DATA LOADING (CACHED FOR 24 HOURS) ---
-# We set ttl=86400 seconds (24 hours) so we don't annoy Yahoo Finance
-@st.cache_data(ttl=86400)
-def fetch_stock_data(symbol):
-    try:
-        ticker = yf.Ticker(symbol)
-        # Try different data fields as fallback for crypto vs stocks
-        info = ticker.info
-        price = info.get('regularMarketPrice') or info.get('currentPrice') or ticker.fast_info['lastPrice']
-        mc = info.get('marketCap') or ticker.fast_info['marketCap']
-        
-        if price and mc:
-            return {'Symbol': symbol.split('-')[0], 'Price': price, 'MC_B': mc / 1_000_000_000}
-    except:
-        return None
-    return None
-
-# --- SESSION STATE (YOUR PRIVATE DATA BANK) ---
-if 'my_symbols' not in st.session_state:
-    st.session_state.my_symbols = ['AAPL', 'TSLA', 'NVDA', 'BTC-USD']
-
-# --- SIDEBAR: ADD NEW SYMBOLS ---
-st.sidebar.header("Add to Portfolio")
-new_sym = st.sidebar.text_input("Enter Ticker (e.g. MSFT, SOL-USD)", "").upper()
-if st.sidebar.button("Add Ticker") and new_sym:
-    if new_sym not in st.session_state.my_symbols:
-        st.session_state.my_symbols.append(new_sym)
-        st.cache_data.clear() # Refresh data when you add a new one
-
-# --- PROCESS DATA ---
-final_data = []
-for s in st.session_state.my_symbols:
-    res = fetch_stock_data(s)
-    if res:
-        final_data.append(res)
-
-df = pd.DataFrame(final_data)
-
-if not df.empty:
-    st.sidebar.header("Set 2030 Targets ($ Billions)")
-    target_values = {}
+# --- IMPROVED DATA FETCHING ---
+@st.cache_data(ttl=86400) # Only talks to Yahoo once every 24 hours
+def get_safe_data(symbol_list):
+    results = []
+    # Using a browser-like "User-Agent" to prevent being blocked
+    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
     
-    # Create sliders for each stock
-    for index, row in df.iterrows():
-        current_mc = int(row['MC_B'])
-        target_values[row['Symbol']] = st.sidebar.slider(
-            f"{row['Symbol']} Target MC",
-            min_value=1,
-            max_value=max(current_mc * 10, 10000),
-            value=current_mc * 2
+    for s in symbol_list:
+        try:
+            ticker = yf.Ticker(s)
+            # Use 'fast_info' for speed and to stay under the radar
+            data = ticker.fast_info
+            price = data['lastPrice']
+            mc = data['marketCap'] / 1_000_000_000
+            
+            # Use 'longName' if possible, otherwise just the symbol
+            name = s.split('-')[0]
+            results.append({'Symbol': name, 'Current Price': price, 'Current MC (B)': mc})
+        except Exception:
+            # If it fails, try a secondary fallback method
+            try:
+                info = yf.Ticker(s).info
+                price = info.get('currentPrice') or info.get('regularMarketPrice')
+                mc = info.get('marketCap') / 1_000_000_000
+                results.append({'Symbol': s.split('-')[0], 'Current Price': price, 'Current MC (B)': mc})
+            except:
+                continue # Skip if both fail
+    return pd.DataFrame(results)
+
+# --- APP LAYOUT ---
+st.title("📈 2030 Price & Market Cap Simulator")
+
+# Initialize list if first time
+if 'symbols' not in st.session_state:
+    st.session_state.symbols = ['AAPL', 'TSLA', 'NVDA', 'BTC-USD', 'ETH-USD']
+
+# Sidebar Search
+st.sidebar.header("Add Assets")
+search = st.sidebar.text_input("Ticker (e.g., MSFT or SOL-USD)").upper()
+if st.sidebar.button("Add to List") and search:
+    if search not in st.session_state.symbols:
+        st.session_state.symbols.append(search)
+        st.cache_data.clear() # Force refresh to get new asset
+        st.rerun()
+
+df = get_safe_data(st.session_state.symbols)
+
+if df.empty:
+    st.error("⚠️ Yahoo is still blocking the server IP. Please wait 10 mins or try a 'Force Refresh'.")
+    if st.button("Force Refresh"):
+        st.cache_data.clear()
+        st.rerun()
+else:
+    # --- SLIDERS ---
+    st.sidebar.header("2030 Market Cap Targets ($B)")
+    targets = {}
+    for _, row in df.iterrows():
+        # Set slider max to 10x current MC or $15T
+        max_v = max(int(row['Current MC (B)'] * 10), 15000)
+        targets[row['Symbol']] = st.sidebar.slider(
+            f"{row['Symbol']} Target", 
+            1, max_v, int(row['Current MC (B)'] * 2)
         )
 
-    # --- CALCULATE ---
-    def calc(row):
-        target_mc = target_values[row['Symbol']]
-        cagr = ((target_mc / row['MC_B'])**(1/5) - 1) * 100
-        target_price = row['Price'] * (target_mc / row['MC_B'])
-        return pd.Series([target_mc, target_price, cagr])
+    # --- MATH ---
+    def calculate(row):
+        target_mc = targets[row['Symbol']]
+        cagr = ((target_mc / row['Current MC (B)'])**(1/5) - 1) * 100
+        target_p = row['Current Price'] * (target_mc / row['Current MC (B)'])
+        return pd.Series([target_mc, target_p, cagr])
 
-    df[['Target MC', 'Target Price', 'CAGR (%)']] = df.apply(calc, axis=1)
+    df[['Target MC', 'Target Price', 'CAGR (%)']] = df.apply(calculate, axis=1)
     df = df.sort_values('CAGR (%)', ascending=False)
     df['Rank'] = range(1, len(df) + 1)
 
     # --- VISUALS ---
-    col1, col2 = st.columns([2, 1])
-
-    with col1:
-        st.subheader("Results Table")
-        st.dataframe(df[['Rank', 'Symbol', 'Price', 'MC_B', 'Target MC', 'Target Price', 'CAGR (%)']].style.format({
-            'Price': '${:,.2f}', 'MC_B': '${:,.1f}B', 'Target MC': '${:,.0f}B', 
-            'Target Price': '${:,.2f}', 'CAGR (%)': '{:.2f}%'
+    tab1, tab2 = st.tabs(["📊 Comparison Table", "📈 CAGR Visual"])
+    
+    with tab1:
+        st.dataframe(df[['Rank', 'Symbol', 'Current Price', 'Current MC (B)', 'Target MC', 'Target Price', 'CAGR (%)']].style.format({
+            'Current Price': '${:,.2f}', 'Current MC (B)': '${:,.1f}B', 
+            'Target MC': '${:,.0f}B', 'Target Price': '${:,.2f}', 'CAGR (%)': '{:.2f}%'
         }), use_container_width=True)
 
-    with col2:
-        st.subheader("CAGR Ranking")
-        # Horizontal bar chart for quick visual ranking
+    with tab2:
         st.bar_chart(df, x="Symbol", y="CAGR (%)", color="#29b5e8")
-
-else:
-    st.error("Could not fetch data. Please check your symbols or try again later.")
-    if st.button("Force Refresh"):
-        st.cache_data.clear()
-        st.rerun()
