@@ -6,7 +6,7 @@ st.set_page_config(layout="wide")
 st.title("📈 2030 Price & Market Cap Simulator")
 
 # 1. LIST YOUR SYMBOLS HERE
-symbols = ['AAPL', 'TSLA', 'NVDA', 'MSFT', 'GOOGL', 'AMZN']
+symbols = ['BTCUSD', 'TSLA', 'LMND', 'MSTR', 'IREN']
 
 @st.cache_data(ttl=3600) # This saves data for 1 hour so we don't keep asking Yahoo
 def get_data(symbol_list):
