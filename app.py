@@ -4,16 +4,20 @@ import pandas as pd
 
 st.set_page_config(layout="wide", page_title="2030 Portfolio Architect")
 
-# --- 1. CSS: BALANCED SPACING & CENTERING ---
+# --- 1. CSS: SHIFT UP & TIGHTEN SPACING ---
 st.markdown("""
     <style>
-    /* Add vertical breathing room between stock blocks */
-    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 1.5rem; }
+    /* Shift main content up the page */
+    .block-container { padding-top: 1rem; }
     
-    /* Push the Weight label down so it doesn't overlap the Target input */
-    .stNumberInput { margin-top: 10px; margin-bottom: 5px; }
+    /* Condense Sidebar: Tighten vertical gaps and shift everything up */
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] { gap: 0.4rem; padding-top: 0rem; }
     
-    /* Center Table Data for professional look */
+    /* Precision margin control for input boxes to prevent overlapping */
+    .stNumberInput { margin-bottom: -10px; margin-top: -5px; }
+    [data-testid="stWidgetLabel"] p { font-size: 0.85rem; margin-bottom: -10px; }
+    
+    /* Center Table Data */
     [data-testid="stDataFrame"] td { text-align: center !important; }
     [data-testid="stDataFrame"] th { text-align: center !important; }
     
@@ -22,26 +26,26 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. ROBUST DATA FETCHING (STALE DATA FOCUS) ---
-@st.cache_data(ttl=604800) # CACHED FOR 1 WEEK (Focus on long-term stats, not live)
+# --- 2. TRIPLE-LOCK DATA FETCHING (MAX STABILITY FOR BTC) ---
+@st.cache_data(ttl=604800) # Cache for 1 week to maintain stability
 def get_safe_data(symbol_list):
     results = []
     for s in symbol_list:
         try:
             ticker = yf.Ticker(s)
-            # Try 3 different ways to get data before giving up
+            # Try 3 different layers of data retrieval
             try:
-                # Method 1: Standard fast lookup
+                # Layer 1: Fast Lookup (Stocks)
                 d = ticker.fast_info
                 price, mc = d['lastPrice'], d['marketCap'] / 1_000_000_000
             except:
                 try:
-                    # Method 2: History (Best for Crypto/BTC)
+                    # Layer 2: History Fallback (Crypto/BTC)
                     h = ticker.history(period="5d")
                     price = h['Close'].iloc[-1]
                     mc = ticker.info.get('marketCap', 0) / 1_000_000_000
                 except:
-                    # Method 3: Last Resort Static Info
+                    # Layer 3: Stale Info Fallback
                     inf = ticker.info
                     price = inf.get('previousClose') or inf.get('regularMarketPrice')
                     mc = inf.get('marketCap', 0) / 1_000_000_000
@@ -55,11 +59,10 @@ def get_safe_data(symbol_list):
 # --- 3. SESSION STATE ---
 if 'symbols' not in st.session_state:
     st.session_state.symbols = ['AAPL', 'TSLA', 'BTC-USD', 'NVDA', '3350.T']
-
 if 'targets' not in st.session_state: st.session_state.targets = {}
 if 'weights' not in st.session_state: st.session_state.weights = {}
 
-# --- 4. SIDEBAR: SCALED INPUTS ---
+# --- 4. SIDEBAR: COMPACT 2030 STRATEGY ---
 st.sidebar.header("🎯 2030 Strategy")
 df_raw = get_safe_data(st.session_state.symbols)
 
@@ -68,22 +71,22 @@ if not df_raw.empty:
         sym = row['Symbol']
         curr_mc = row['MC_B']
         
-        # Initialize defaults
+        # Initialize defaults (5x for new additions)
         if sym not in st.session_state.targets: st.session_state.targets[sym] = float(round(curr_mc * 5, 0))
         if sym not in st.session_state.weights: st.session_state.weights[sym] = 0.0
 
-        st.sidebar.subheader(f"📊 {sym}")
+        st.sidebar.markdown(f"**📈 {sym}**")
         
-        # Target MC: 10% Steps
+        # Target MC: Scaled by 10% increments
         mc_step = max(1.0, round(curr_mc * 0.1, 0))
         st.session_state.targets[sym] = st.sidebar.number_input(
-            f"{sym} Target MC ($B)", value=float(st.session_state.targets[sym]), 
+            f"Target MC ($B)", value=float(st.session_state.targets[sym]), 
             key=f"t_{sym}", step=float(mc_step)
         )
         
-        # Weight: 1% Steps (Increased margin for clarity)
+        # Weight %: 1% increments
         st.session_state.weights[sym] = st.sidebar.number_input(
-            f"{sym} Weight %", value=float(st.session_state.weights[sym]), 
+            f"Weight %", value=float(st.session_state.weights[sym]), 
             min_value=0.0, max_value=100.0, step=1.0, key=f"w_{sym}"
         )
         st.sidebar.markdown("---")
@@ -103,16 +106,16 @@ with st.sidebar.expander("Remove Assets"):
             st.session_state.symbols.remove(sym)
             st.rerun()
 
-# --- 5. DISPLAY & CALCULATIONS ---
+# --- 5. CALCULATIONS & DISPLAY ---
 if not df_raw.empty:
-    def calc(row):
+    def calc_metrics(row):
         t_mc = st.session_state.targets.get(row['Symbol'], row['MC_B'] * 5)
         w = st.session_state.weights.get(row['Symbol'], 0) / 100
         cagr = ((t_mc / row['MC_B'])**(1/5) - 1) * 100 if row['MC_B'] > 0 else 0
         t_p = row['Price'] * (t_mc / row['MC_B']) if row['MC_B'] > 0 else 0
         return pd.Series([t_mc, t_p, cagr, w*100, cagr * w])
 
-    df_raw[['Target MC', 'Target Price', 'CAGR (%)', 'Weight %', 'W.CAGR']] = df_raw.apply(calc, axis=1)
+    df_raw[['Target MC', 'Target Price', 'CAGR (%)', 'Weight %', 'W.CAGR']] = df_raw.apply(calc_metrics, axis=1)
     df_final = df_raw.sort_values('CAGR (%)', ascending=False)
     
     st.title("🏆 2030 Portfolio Roadmap")
