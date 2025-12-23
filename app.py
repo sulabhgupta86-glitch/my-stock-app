@@ -39,7 +39,7 @@ else:
         target_values[row['Symbol']] = st.sidebar.slider(
             f"{row['Symbol']} Target",
             min_value=1,
-            max_value=int(row['Current MC (B)'] * 10), # Increased to 10x 
+            max_value=int(row['Current MC (B)'] * 20), # Increased to 10x 
             value=int(row['Current MC (B)'] * 1.5)
         )
 
